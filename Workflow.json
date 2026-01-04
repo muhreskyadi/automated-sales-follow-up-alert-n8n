@@ -1,0 +1,182 @@
+{
+  "name": "Automated Sales Follow-Up Alert for New Leads Not Contacted Within 24 Hours",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 2
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-160, 128],
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "content": "Checks if:\n- Current time minus lead timestamp > 24 hours\n- Lead status equals \"New\"\n",
+        "height": 320,
+        "width": 224,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [208, -16],
+      "typeVersion": 1,
+      "id": "logic-note",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Automated Sales Follow-Up Alert for New Leads Not Contacted Within 24 Hours\n\nThis workflow automatically sends follow-up reminder emails to sales representatives, when new leads have not been contacted within 24 hours after being recorded in the database.\n\nA **24-hour threshold** is applied because lead conversion rates typically decline when initial engagement is delayed beyond the first day. This threshold can be adjusted according to company policies by modifying the **Schedule Trigger** configuration.\n\nWhile this implementation uses **Google Sheets** as the data source for storing incoming leads, the same logic can be adapted for other databases or CRM systems (Salesforce, Hubspot, etc).\n\nA scheduled trigger periodically scans the data source and filters leads that meet the following conditions:\n- Lead status is **\"New\"**\n- No follow-up activity has occurred within the last 24 hours\n\nQualified leads are then grouped by their assigned sales representatives.\nEach sales rep receives a single consolidated email containing the list of leads that require immediate follow-up.\n\nThis workflow helps improve response times, reduce the risk of lead neglect, and standardize the sales follow-up process across teams.",
+        "height": 608,
+        "width": 592,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [-832, 0],
+      "typeVersion": 1,
+      "id": "description-note",
+      "name": "Workflow Description"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-160, 304],
+      "id": "manual-trigger",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Lead Data Spreadsheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "SHEET_GID",
+          "mode": "list",
+          "cachedResultName": "Form Responses",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit#gid=SHEET_GID"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [48, 128],
+      "id": "fetch-leads",
+      "name": "Fetch Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google_sheets_oauth",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json[\"Timestamp\"]}}",
+              "rightValue": "={{$now.minus({ hours: 24 })}}",
+              "operator": {
+                "type": "dateTime",
+                "operation": "before"
+              }
+            },
+            {
+              "leftValue": "={{ $json['Status (Manually)'] }}",
+              "rightValue": "New",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [272, 128],
+      "id": "filter-leads",
+      "name": "Filter New Leads Not Contacted > 24 Hours"
+    },
+    {
+      "parameters": {
+        "fieldsToSummarize": {
+          "values": [
+            { "aggregation": "append", "field": "Name", "includeEmpty": true },
+            { "aggregation": "append", "field": "Phone" },
+            { "aggregation": "append", "field": "Email" }
+          ]
+        },
+        "fieldsToSplitBy": "['Sales Name'],['Sales Email']",
+        "options": {
+          "outputFormat": "singleItem"
+        }
+      },
+      "type": "n8n-nodes-base.summarize",
+      "typeVersion": 1.1,
+      "position": [512, 128],
+      "id": "group-by-sales",
+      "name": "Group Leads by Sales Representative"
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = [];\n\nfor (const salesName of Object.keys($json)) {\n  const salesObj = $json[salesName];\n\n  for (const salesEmail of Object.keys(salesObj)) {\n    const data = salesObj[salesEmail];\n\n    const leads = [];\n\n    for (let i = 0; i < data.appended_Name.length; i++) {\n      leads.push({\n        name: data.appended_Name[i],\n        email: data.appended_Email?.[i] || '-',\n        phone: data.appended_Phone?.[i] || '-',\n      });\n    }\n\n    result.push({\n      json: {\n        sales_name: salesName,\n        sales_email: salesEmail,\n        leads,\n      }\n    });\n  }\n}\n\nreturn result;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 128],
+      "id": "prepare-email",
+      "name": "Prepare Email Payload"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.sales_email }}",
+        "subject": "=Follow-Up Reminder: Leads Not Contacted in 24 Hours",
+        "emailType": "text",
+        "message": "=Dear {{$json.sales_name}},\n\nBelow is the list of leads that have not been contacted for more than 24 hours:\n\n{{ $json.leads.map(l => `- ${l.name} | ${l.email} | ${l.phone}`).join('\\n') }}\n\nPlease proceed with the follow-up as soon as possible.\n\nThank you,\nSales Operations"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [944, 128],
+      "id": "send-email",
+      "name": "Send Follow-Up Email to Sales",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail_oauth",
+          "name": "Gmail OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Fetch Leads", "type": "main", "index": 0 }]] },
+    "When clicking ‘Execute workflow’": { "main": [[{ "node": "Fetch Leads", "type": "main", "index": 0 }]] },
+    "Fetch Leads": { "main": [[{ "node": "Filter New Leads Not Contacted > 24 Hours", "type": "main", "index": 0 }]] },
+    "Filter New Leads Not Contacted > 24 Hours": { "main": [[{ "node": "Group Leads by Sales Representative", "type": "main", "index": 0 }]] },
+    "Group Leads by Sales Representative": { "main": [[{ "node": "Prepare Email Payload", "type": "main", "index": 0 }]] },
+    "Prepare Email Payload": { "main": [[{ "node": "Send Follow-Up Email to Sales", "type": "main", "index": 0 }]] }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
